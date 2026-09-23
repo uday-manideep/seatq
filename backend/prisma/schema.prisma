@@ -1,0 +1,201 @@
+// SeatQ database schema
+// Docs: https://www.prisma.io/docs
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum HotelStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+}
+
+enum StaffRole {
+  OWNER
+  MANAGER
+  HOST
+}
+
+enum QueueStatus {
+  WAITING
+  CALLED
+  ARRIVED
+  SEATED
+  NO_SHOW
+  CANCELLED
+}
+
+enum NotificationChannel {
+  PUSH
+  WHATSAPP
+  SMS
+  VOICE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum SettlementStatus {
+  PENDING
+  PAID
+}
+
+// ---------- Core tables ----------
+
+model Hotel {
+  id             String      @id @default(cuid())
+  name           String
+  ownerId        String      @map("owner_id")
+  status         HotelStatus @default(PENDING)
+  bankAccountRef String?     @map("bank_account_ref")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  branches     Branch[]
+  staff        StaffUser[]
+  settlements  Settlement[]
+
+  @@map("hotels")
+}
+
+model Branch {
+  id          String   @id @default(cuid())
+  hotelId     String   @map("hotel_id")
+  name        String
+  address     String?
+  geoLat      Float?   @map("geo_lat")
+  geoLng      Float?   @map("geo_lng")
+  openHours   String?  @map("open_hours")
+  queuePaused Boolean  @default(false) @map("queue_paused")
+  maxQueue    Int      @default(100) @map("max_queue")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  hotel        Hotel        @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  staff        StaffUser[]
+  queueEntries QueueEntry[]
+
+  @@index([hotelId])
+  @@map("branches")
+}
+
+model StaffUser {
+  id        String    @id @default(cuid())
+  hotelId   String    @map("hotel_id")
+  branchId  String?   @map("branch_id")
+  phone     String    @unique
+  name      String?
+  role      StaffRole @default(HOST)
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  hotel  Hotel   @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([hotelId])
+  @@index([branchId])
+  @@map("staff_users")
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  queueEntries QueueEntry[]
+
+  @@map("customers")
+}
+
+model QueueEntry {
+  id         String      @id @default(cuid())
+  branchId   String      @map("branch_id")
+  customerId String      @map("customer_id")
+  name       String
+  partySize  Int         @map("party_size")
+  status     QueueStatus @default(WAITING)
+  position   Int
+  code       String      @unique @default(cuid())
+
+  joinedAt DateTime  @default(now()) @map("joined_at")
+  calledAt DateTime? @map("called_at")
+  seatedAt DateTime? @map("seated_at")
+
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  callAttempts CallAttempt[]
+  payment      Payment?
+  auditLogs    AuditLog[]
+
+  @@index([branchId, status])
+  @@map("queue_entries")
+}
+
+model CallAttempt {
+  id         String               @id @default(cuid())
+  entryId    String               @map("entry_id")
+  attemptNo  Int                  @map("attempt_no")
+  channel    NotificationChannel
+  sentAt     DateTime             @default(now()) @map("sent_at")
+  delivered  Boolean              @default(false)
+
+  entry QueueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@map("call_attempts")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  entryId       String        @unique @map("entry_id")
+  amount        Int
+  gatewayId     String?       @map("gateway_id")
+  status        PaymentStatus @default(PENDING)
+  hotelShare    Int?          @map("hotel_share")
+  platformShare Int?          @map("platform_share")
+  refundedAt    DateTime?     @map("refunded_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  entry QueueEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Settlement {
+  id        String           @id @default(cuid())
+  hotelId   String           @map("hotel_id")
+  period    String
+  total     Int
+  status    SettlementStatus @default(PENDING)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId])
+  @@map("settlements")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actor     String
+  action    String
+  entryId   String?  @map("entry_id")
+  timestamp DateTime @default(now())
+
+  entry QueueEntry? @relation(fields: [entryId], references: [id], onDelete: SetNull)
+
+  @@index([entryId])
+  @@map("audit_logs")
+}

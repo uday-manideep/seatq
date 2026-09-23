@@ -1,7 +1,7 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Client } from "pg";
 import Redis from "ioredis";
+import { PrismaService } from "../prisma/prisma.service";
 
 export interface HealthStatus {
   status: "ok" | "degraded";
@@ -13,7 +13,10 @@ export interface HealthStatus {
 export class HealthService implements OnModuleDestroy {
   private redis: Redis;
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private prisma: PrismaService,
+  ) {
     this.redis = new Redis(this.config.get<string>("REDIS_URL")!, {
       lazyConnect: true,
       maxRetriesPerRequest: 1,
@@ -34,17 +37,11 @@ export class HealthService implements OnModuleDestroy {
   }
 
   private async checkDatabase(): Promise<"connected" | "error"> {
-    const client = new Client({
-      connectionString: this.config.get<string>("DATABASE_URL"),
-    });
     try {
-      await client.connect();
-      await client.query("SELECT 1");
+      await this.prisma.$queryRaw`SELECT 1`;
       return "connected";
     } catch {
       return "error";
-    } finally {
-      await client.end().catch(() => undefined);
     }
   }
 
